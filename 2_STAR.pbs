@@ -1,0 +1,44 @@
+#PBS -N STAR.2.6.0c_map
+#PBS -M johndou@umich.edu
+#PBS -m abe
+#PBS -j oe
+#PBS -V
+
+#PBS -q fluxod
+#PBS -A bakulski_fluxod
+#PBS -l qos=flux
+
+#PBS -l nodes=1:ppn=6:largemem,mem=64gb,walltime=72:00:00 
+
+cat $PBS_NODEFILE
+
+module load samtools
+
+for path in /nfs/turbo/bakulski1/Datasets/Padmanabhan/ruddle.brcf.med.umich.edu/Run_2742/padmanabha/Sample_124*; do
+	
+	SAMPLEID="$(basename "${path}")"
+	
+	rm -r /nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/STAR/$SAMPLEID/
+	mkdir /nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/STAR/$SAMPLEID/
+ 
+	for file in $path/*.fastq.gz; do
+    FASTQF="$(basename "${file}")"
+    PREFIX=${FASTQF//.fastq.gzAligned.out.sam/}
+    
+	  /nfs/turbo/bakulski1/Software/STAR/bin/Linux_x86_64_static/STAR \
+  	--genomeDir /nfs/turbo/bakulski1/People/johndou/Sheep_Genome/refSTAR/ \
+  	--readFilesIn \
+  	/nfs/turbo/bakulski1/Datasets/Padmanabhan/ruddle.brcf.med.umich.edu/Run_2742/padmanabha/$SAMPLEID/$FASTQF \
+  	--readFilesCommand gunzip -c \
+  	--runThreadN 6 \
+  	--clip5pNbases 0 3 \
+  	--outFilterMultimapNmax 10 \
+  	--outSAMmode Full \
+  	--sjdbScore 2 \
+  	--outFileNamePrefix \
+  	/nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/STAR/$SAMPLEID/$PREFIX \
+  	--outReadsUnmapped Fastx
+   
+   done
+
+done

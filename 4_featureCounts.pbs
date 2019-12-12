@@ -1,0 +1,28 @@
+#PBS -N featureCount_sheep
+#PBS -M johndou@umich.edu
+#PBS -m abe
+#PBS -V
+
+#PBS -q fluxod
+#PBS -A bakulski_fluxod
+#PBS -l qos=flux
+
+#PBS -l nodes=3:ppn=3,pmem=3500mb,walltime=72:00:00
+
+cat $PBS_NODEFILE
+
+module load subread/1.6.1
+module load samtools
+
+ALIGNED=$(find /nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/STAR/ -name "*Aligned.out.sam")
+
+cd /nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/
+ 
+featureCounts \
+	-T 9 \
+	-s 2 \
+	-t exon \
+	-g gene_id \
+	-a /nfs/turbo/bakulski1/People/johndou/Sheep_Genome/Oar_v3.1/Ovis_aries.Oar_v3.1.95.gtf \
+	-o /nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/featureCounts/featurecounts \
+	$ALIGNED

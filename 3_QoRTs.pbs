@@ -1,0 +1,38 @@
+#PBS -N qorts
+#PBS -M johndou@umich.edu
+#PBS -m abe
+#PBS -j oe
+#PBS -V
+
+#PBS -q fluxod
+#PBS -A bakulski_fluxod
+#PBS -l qos=flux
+
+#PBS -l nodes=1:ppn=1,mem=20gb,walltime=24:00:00 
+
+cat $PBS_NODEFILE
+
+
+for path in /nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/STAR/Sample_124*; do
+	
+	SAMPLEID="$(basename "${path}")"
+	
+	rm -r /nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/QoRTs/$SAMPLEID/
+	mkdir /nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/QoRTs/$SAMPLEID/
+ 
+	for file in $path/*Aligned.out.sam; do
+    SAMF="$(basename "${file}")"
+    FOLDER=${SAMF//.fastq.gzAligned.out.sam/}
+    
+	  mkdir /nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/QoRTs/$SAMPLEID/$FOLDER/
+    
+	  java -Xmx16G -jar /nfs/turbo/bakulski1/People/johndou/BeWo_RNAseq/QoRTs.jar QC\
+    --stranded \
+    --singleEnded \
+    /nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/STAR/$SAMPLEID/$SAMF  \
+    /nfs/turbo/bakulski1/People/johndou/Sheep_Genome/Oar_v3.1/Ovis_aries.Oar_v3.1.95.gtf  \
+    /nfs/turbo/bakulski1/People/johndou/vsheep/Run_2742/QoRTs/$SAMPLEID/$FOLDER/
+   
+   done
+
+done

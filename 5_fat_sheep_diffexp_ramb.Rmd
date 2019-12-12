@@ -1,0 +1,1088 @@
+---
+title: "SAT and VAT Sheep"
+author: "John Dou"
+date: "April 26, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Code for analysis of sheep RNAseq adipose tissue with bisphenol A exposure
+
+
+Install packages if not already.
+Change working directory where files feature counts output located.
+```{r libs, message=FALSE, warning=FALSE}
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("EnhancedVolcano")
+# BiocManager::install("DESeq2")
+# install.packages('ggplot2')
+# install.packages('knitr')
+
+library(knitr)
+library(DESeq2)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(EnhancedVolcano)
+library(dplyr)
+setwd('C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA')
+```
+
+## Sample data and gene counts
+
+Here I read in sample data and gene counts, making sure to edit the format of the sample id's so that they will match with each other.
+```{r data}
+###############################
+#set up meta data
+###############################
+meta <- read.csv("Run_2742_padmanabha.csv",skip=18)
+
+pd <- data.frame(unique.ID=paste0(meta$Sample_ID,'_L00',meta$Lane),
+                group.ID=sub('9..','',meta$Description),
+                lane.ID=meta$Lane,
+                sample.ID=meta$Sample_ID,
+                sheep.ID=substr(meta$Description,1,3))
+pd$tissue <- ifelse(grepl('VAT',pd$group.ID),'VAT','SAT')
+pd$treat <- ifelse(grepl('B2',pd$group.ID),'B2','C')
+
+
+###############################
+#read in counts
+###############################
+
+counts <- read.table("featurecounts_ram", skip=1, header=T)
+summ <- read.table("featurecounts_ram.summary", header=T)
+
+### editing of sample names, since I didn't make them nice in previous steps
+names(counts) <- sub('X.nfs.turbo.bakulski1.People.johndou.vsheep.Run_2742.STAR_ram.Sample_.......','',names(counts))
+names(counts) <- sub('Aligned.out.sam','',names(counts))
+names(counts) <- sub('_.*_S.{1,2}_','',names(counts))
+names(counts)[7:70] <- paste0('Sample_',names(counts)[7:70])
+names(counts)[7:70] <- sub('L','_L',names(counts)[7:70])
+names(counts)[7:70] <- sub('_R1_001','',names(counts)[7:70])
+
+names(summ) <- sub('X.nfs.turbo.bakulski1.People.johndou.vsheep.Run_2742.STAR_ram.Sample_.......','',names(summ))
+names(summ) <- sub('Aligned.out.sam','',names(summ))
+names(summ) <- sub('_.*_S.{1,2}_','',names(summ))
+names(summ)[2:65] <- paste0('Sample_',names(summ)[2:65])
+names(summ)[2:65] <- sub('L','_L',names(summ)[2:65])
+names(summ)[2:65] <- sub('_R1_001','',names(summ)[2:65])
+
+gene.counts <- counts
+rownames(gene.counts) <- gene.counts$Geneid
+gene.counts <- gene.counts[,7:70]
+gene.counts <- gene.counts[,as.character(pd$unique.ID)]
+```
+
+
+
+## DESeq2
+
+The sample data and gene counts are read here into DESeq2, and the model specified. DESeq2 will run this regression model for each gene.
+
+```{r}
+deseq.ds <- DESeqDataSetFromMatrix(countData = gene.counts,
+                                   colData = pd,
+                                   design = ~ group.ID)
+rm(gene.counts,pd)
+```
+
+
+From these PCA plots, we can see each sample's four lanes group on top of each other. Next, the lanes are collapsed. 
+
+```{r}
+#PCA plot
+vsd <- vst(deseq.ds)
+plotPCA(vsd, "lane.ID") + ggtitle('Lane')
+
+rm(vsd)
+
+#collapse the lanes together
+combi.ds <- collapseReplicates(deseq.ds, groupby = deseq.ds$sample.ID) 
+
+# check that the sum of the counts for first sample is the same as the counts in the sample 1 column in collapsed dataset
+matchFirstLevel <- deseq.ds$sample.ID == levels(deseq.ds$sample.ID)[1]
+stopifnot(all(rowSums(counts(deseq.ds[,matchFirstLevel])) == counts(combi.ds[,1])))
+
+save(combi.ds,file='combi_ram.ds.rda')
+```
+
+
+Note: can start from "combi.ds" and "genes.anno" objects if you don't want to run everything above.
+
+```{r}
+setwd('C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA')
+load('combi_ram.ds.rda')
+load('genes.anno.rda')
+```
+
+
+PCA plot with collapsed values
+
+```{r}
+vsd <- vst(combi.ds)
+pca.grp <- plotPCA(vsd, "group.ID") + 
+  scale_color_discrete(name='Group', labels=c('Subcutaneous BPA','Subcutaneous Ctrl', 'Visceral BPA', 'Visceral Ctrl')) +
+  theme(axis.text=element_text(size=16),
+        axis.title=element_text(size=18),
+        legend.title=element_text(size=14),
+        legend.text=element_text(size=12)) +
+  geom_point(size=4)
+
+pdf('PCA_plot.pdf')
+pca.grp
+dev.off()
+
+plotPCA(vsd, "sheep.ID") + ggtitle('By Sheep')
+rm(vsd)
+```
+
+
+Supplementary Table 1 - Technical Information
+
+```{r tab1}
+### collapse read counts for supp table 1
+rownames(summ) <- summ$Status
+summ <- summ[,-1]
+summ <- summ[,as.character(pd$unique.ID)]
+summ <- data.frame(t(summ))
+summ$samp <- pd$sample.ID
+n_reads <- summ %>%
+  group_by(samp) %>%
+  summarise(reads=sum(Assigned))
+
+tab1 <- n_reads
+
+#get tissue and treatment info from pd
+tt <- unique(pd[,c('sample.ID','tissue','treat')])
+identical(tt$sample.ID,tab1$samp)
+tab1 <- cbind(tab1,tt[,-1])
+
+#compute n genes from counts(combi.ds)
+n_genes <- colSums(counts(combi.ds)>0)
+identical(names(n_genes),as.character(tab1$samp))
+tab1$genes <- n_genes
+tab1 <- tab1[,c('samp','tissue','treat','reads','genes')]
+write.csv(tab1,row.names=F, file='table1.csv')
+
+tab1$group <- paste0(tab1$tissue,tab1$treat)
+summary(aov(reads~group,data=tab1))
+t.test(reads~tissue,data=tab1)
+t.test(reads~treat,data=tab1)
+
+summary(aov(genes~group,data=tab1))
+t.test(genes~tissue,data=tab1)
+t.test(genes~treat,data=tab1)
+```
+
+
+Fit model
+
+```{r model}
+#fit model
+groups.res <- DESeq(combi.ds)
+
+#use this function to list out the coefficients
+resultsNames(groups.res)
+
+#get results
+res.tissue_among_controls <- results(groups.res, contrast=c("group.ID","SATC","VATC"))
+res.tissue_among_bisphenol <- results(groups.res, contrast=c("group.ID","SATB2","VATB2"))
+res.bisphenol_visceral <- results(groups.res, contrast=c("group.ID","VATB2","VATC"))
+res.bisphenol_subcut <- results(groups.res, contrast=c("group.ID","SATB2","SATC"))
+
+```
+
+Filtering of genes is done by DESeq2. Genes with low normalized mean counts and extreme count outliers are filtered. Filtered genes have the adjusted p-value set to NA. Other columns in the results file may also be set to NA depending on reasons for filtering.
+
+```{r filter}
+head(res.tissue_among_controls)
+
+#filtered for any reason
+table(is.na(res.tissue_among_controls$padj)) 
+table(is.na(res.tissue_among_bisphenol$padj)) 
+table(is.na(res.bisphenol_subcut$padj)) 
+table(is.na(res.bisphenol_visceral$padj)) 
+
+#all sample count zero
+table(res.tissue_among_controls$baseMean==0) 
+
+#independent filtering for low normalized mean counts
+table(!is.na(res.tissue_among_controls$pvalue) & is.na(res.tissue_among_controls$padj)) 
+
+#count outlier by Cook's distance
+table(!is.na(res.tissue_among_controls$log2FoldChange) & is.na(res.tissue_among_controls$pvalue) & is.na(res.tissue_among_controls$padj)) 
+
+
+```
+
+## Volcano Plots
+Here log fold change shrinkage is done first on results. Then, volcano plots are created.
+
+Adjusted p-values are plotted on these, and the adjusted p-cutoff lines are 0.05. LogFC cutoff lines were more arbitrarily decided (2.5 for tissue type differences, 1.0 for bpa in visceral, 1.5 for bpa in subcutaneous).
+
+```{r tissue_comp}
+
+giveTable <- function(res,p=0.05,order=c('padj','lfc')){
+  tab <- res[!is.na(res$padj),]
+  if(order=='lfc'){
+    tab <- tab[order(-abs(tab$log2FoldChange)),]
+  }else if (order=='padj'){
+    tab <- tab[order(tab$padj),]
+  }
+  tab
+}
+
+gene.labels <- rownames(res.tissue_among_controls)
+
+reorder <- groups.res
+reorder$group.ID <- relevel(reorder$group.ID,'VATC')
+reorder <- nbinomWaldTest(reorder)
+resultsNames(reorder)
+reorder.tissue <- results(reorder, name="group.ID_SATC_vs_VATC")
+
+shrink.tissue_cont <- lfcShrink(reorder, coef="group.ID_SATC_vs_VATC", res=reorder.tissue, type='apeglm')
+EnhancedVolcano(shrink.tissue_cont, 
+                title='Tissue (Subcutaneous Control vs Visceral Controls)',
+                subtitle='',
+                caption='',
+                lab=gene.labels, 
+                selectLab=c('LRRN4','BARX1','TF','EPHX2','HOXC9','PITX2','IRX2','HOXA9'),
+                x='log2FoldChange',
+                y='padj',
+                ylab = bquote(~-Log[10]~adjusted~italic(P)),
+                #xlim = c(-4.5,6.0),
+                #ylim = c(0,40),
+                legendVisible = F,
+                pCutoff=0.05,
+                FCcutoff=2.5,
+                transcriptLabSize = 3.5,
+                #drawConnectors = TRUE,
+                transcriptPointSize = 1.8,
+                colAlpha = 1) +
+  theme(plot.margin = unit(c(1,1,2,1),"lines")) +
+  coord_cartesian(clip="off") +
+  annotation_custom(textGrob("Greater Expression in VAT"), xmin=-7, xmax=-7, ymin=-23, ymax=-23) +
+  annotation_custom(textGrob("Greater Expression in SAT"), xmin=7, xmax=7, ymin=-23, ymax=-23)
+
+table(shrink.tissue_cont$padj<0.05)
+table(abs(shrink.tissue_cont$log2FoldChange)>2.5)
+table(shrink.tissue_cont$padj<0.05 & abs(shrink.tissue_cont$log2FoldChange)>2.5)
+table(shrink.tissue_cont$log2FoldChange[shrink.tissue_cont$padj<0.05 & abs(shrink.tissue_cont$log2FoldChange)>2.5] > 0)
+
+tab2 <- giveTable(shrink.tissue_cont,order='padj')
+head(giveTable(shrink.tissue_cont,order='lfc'))
+write.csv(tab2, file='SAT vs VAT DE.csv')
+```
+
+```{r bpa_vat}
+resultsNames(reorder)
+reorder.b2_vat <- results(reorder, name="group.ID_VATB2_vs_VATC")
+
+#shrink.b2_vat <- lfcShrink(groups.res, contrast=c("group.ID","VATB2","VATC"), res=res.bisphenol_visceral, type='apeglm')
+shrink.b2_vat <- lfcShrink(reorder, coef="group.ID_VATB2_vs_VATC", res=reorder.b2_vat, type='apeglm')
+shrink.b2_vat <- shrink.b2_vat[!is.na(shrink.b2_vat$padj),]
+EnhancedVolcano(shrink.b2_vat, 
+                title='Bisphenol A (Visceral)',
+                subtitle='',
+                caption='',
+                legendVisible = F,
+                lab=rownames(shrink.b2_vat), 
+                selectLab=c('SLC7A8','LOC114114128'),
+                x='log2FoldChange',
+                y='padj',
+                ylab = bquote(~-Log[10]~adjusted~italic(P)),
+                xlim = c(-1.8,4.4),
+                ylim = c(0,10),
+                pCutoff=0.05,
+                FCcutoff=1.5,
+                transcriptLabSize = 3.5,
+                transcriptPointSize = 1.8,
+                colAlpha = 1) +
+  theme(plot.margin = unit(c(1,1,2,1),"lines")) +
+  coord_cartesian(clip="off") +
+  annotation_custom(textGrob("Greater Expression \nin Control"), xmin=-1.0, xmax=-1.0, ymin=-7, ymax=-7) +
+  annotation_custom(textGrob("Greater Expression \nwith BPA"), xmin=3, xmax=3, ymin=-7, ymax=-7)
+
+
+table(shrink.b2_vat$padj<0.05)
+table(abs(shrink.b2_vat$log2FoldChange)>1.5)
+table(shrink.b2_vat$padj<0.05 & abs(shrink.b2_vat$log2FoldChange)>1.5)
+shrink.b2_vat[shrink.b2_vat$padj<0.05 & shrink.b2_vat$log2FoldChange>1.5,]
+
+tab4 <- giveTable(shrink.b2_vat,order='padj')
+write.csv(tab4, file='BPA (visceral) DE.csv')
+```
+
+
+```{r bpa_sat}
+reorder <- groups.res
+reorder$group.ID <- relevel(reorder$group.ID,'SATC')
+reorder <- nbinomWaldTest(reorder)
+resultsNames(reorder)
+reorder.b2_sat <- results(reorder, name="group.ID_SATB2_vs_SATC")
+
+#shrink.b2_sat <- lfcShrink(groups.res, contrast=c("group.ID","SATB2","SATC"), res=res.bisphenol_subcut)
+shrink.b2_sat <- lfcShrink(reorder, coef="group.ID_SATB2_vs_SATC", res=reorder.b2_sat, type='apeglm')
+shrink.b2_sat <- shrink.b2_sat[!is.na(shrink.b2_sat$padj),]
+EnhancedVolcano(shrink.b2_sat, 
+                title='Bisphenol A (Subcutaneous)',
+                subtitle='',
+                caption='',
+                legendVisible = F,
+                lab=rownames(shrink.b2_sat), 
+                selectLab=c('SFRP2', 'SRGN','CNTD2','LOC114117140','LOC114112289'),
+                x='log2FoldChange',
+                y='padj',
+                ylab = bquote(~-Log[10]~adjusted~italic(P)),
+                xlim = c(-3.2,5.0),
+                ylim = c(0,10),
+                pCutoff=0.05,
+                FCcutoff=1.5,
+                transcriptLabSize = 3.5,
+                transcriptPointSize = 1.8,
+                colAlpha = 1) +
+  coord_cartesian(clip="off") +
+  annotation_custom(textGrob("Greater Expression in Control"), xmin=-2.1, xmax=-2.1, ymin=-5, ymax=-5) +
+  annotation_custom(textGrob("Greater Expression with BPA"), xmin=3, xmax=3, ymin=-5, ymax=-5)
+
+
+table(shrink.b2_sat$padj<0.05)
+table(abs(shrink.b2_sat$log2FoldChange)>1.5)
+table(shrink.b2_sat$padj<0.05 & abs(shrink.b2_sat$log2FoldChange)>1.5)
+table(shrink.b2_sat$log2FoldChange[shrink.b2_sat$padj<0.05 & shrink.b2_sat$log2FoldChange>1.5] > 0)
+
+tab3 <- giveTable(shrink.b2_sat,order='padj')
+head(giveTable(shrink.b2_sat,order='lfc'))
+write.csv(tab3, file='BPA (Subcutaneous) DE.csv')
+
+```
+
+##Correlation of tissue type and bisphenol A effects
+
+```{r corrs}
+#tissue type correlation across treatment groups
+smoothScatter(shrink.tissue_cont$log2FoldChange,shrink.tissue_bis$log2FoldChange)
+cor(shrink.tissue_cont$log2FoldChange,shrink.tissue_bis$log2FoldChange,use='complete.obs')
+
+smoothScatter(-log(shrink.tissue_cont$padj),-log(shrink.tissue_bis$padj))
+cor(-log(shrink.tissue_cont$padj),-log(shrink.tissue_bis$padj),use='complete.obs')
+
+#BPA effect correlation across cell types
+smoothScatter(shrink.b2_sat$log2FoldChange,shrink.b2_vat$log2FoldChange)
+cor(shrink.b2_sat$log2FoldChange,shrink.b2_vat$log2FoldChange,use='complete.obs')
+
+smoothScatter(-log(shrink.b2_sat$padj),-log(shrink.b2_vat$padj))
+cor(-log(shrink.b2_sat$padj),-log(shrink.b2_vat$padj),use='complete.obs')
+
+#tissue vs bpa
+smoothScatter(shrink.tissue_cont$log2FoldChange,shrink.b2_sat$log2FoldChange)
+cor(shrink.tissue_cont$log2FoldChange,shrink.b2_sat$log2FoldChange,use='complete.obs')
+
+smoothScatter(-log(shrink.tissue_cont$padj),-log(shrink.b2_sat$padj))
+cor(-log(shrink.tissue_cont$padj),-log(shrink.b2_sat$padj),use='complete.obs')
+```
+
+
+
+## LR path 
+
+```{r LRpath}
+#load DE genes results
+setwd("C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files")
+de.tissue <- read.csv('DE SAT vs VAT.csv',header=T,row.names="X")
+de.sat <- read.csv('DE BPA (Subcutaneous).csv',header=T,row.names="X")
+de.vat <- read.csv('DE BPA (visceral).csv',header=T,row.names="X")
+
+#load up deseq object and get normalized counts
+load('../combi_ram.ds.rda')
+combi.res <- DESeq(combi.ds)
+counts <- counts(combi.res, normalized=T)
+
+#gtf to get entrezid
+library(rtracklayer)
+library(dplyr)
+gtf <- import('C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/GCF_002742125.1_Oar_rambouillet_v1.0_genomic.gtf.gz')
+
+#get ortholog dataset downloaded from biomart
+library(org.Hs.eg.db)
+ortho <- read.table("../../orthologs.txt",sep="\t", header=T, stringsAsFactors = F)
+
+
+### write input files for LR path according to instructions for RNAenrich
+
+#tissue
+tissue.counts <- counts[match(rownames(de.tissue),rownames(counts)),]
+tissue.ortho <- ortho[match(rownames(de.tissue),ortho$Sheep.gene.name),"Gene.name"]
+tissue.ortho <- unlist(mapIds(org.Hs.eg.db, tissue.ortho, "ENTREZID", "SYMBOL"))
+tissue.LR <- data.frame(geneid=tissue.ortho[match(rownames(de.tissue),names(tissue.ortho))],
+                        PValue=de.tissue$pvalue,
+                        logFC=de.tissue$log2FoldChange,
+                        norm_avg_readcount=rowMeans(tissue.counts))
+tissue.LR <- tissue.LR[!is.na(tissue.LR$geneid),]
+write.table(tissue.LR, sep="\t", row.names=FALSE, quote=FALSE, file=file.path("./LRpath/tissue_LR_input.txt"))
+
+#bpa in sat
+sat.counts <- counts[match(rownames(de.sat),rownames(counts)),]
+sat.ortho <- ortho[match(rownames(de.sat),ortho$Sheep.gene.name),"Gene.name"]
+sat.ortho <- unlist(mapIds(org.Hs.eg.db, sat.ortho, "ENTREZID", "SYMBOL"))
+sat.LR <- data.frame(geneid=sat.ortho[match(rownames(de.sat),names(sat.ortho))],
+                        PValue=de.sat$pvalue,
+                        logFC=de.sat$log2FoldChange,
+                        norm_avg_readcount=rowMeans(sat.counts))
+sat.LR <- sat.LR[!is.na(sat.LR$geneid),]
+write.table(sat.LR, sep="\t", row.names=FALSE, quote=FALSE, file=file.path("./LRpath/sat_LR_input.txt"))
+
+
+#bpa in vat
+vat.counts <- counts[match(rownames(de.vat),rownames(counts)),]
+vat.ortho <- ortho[match(rownames(de.vat),ortho$Sheep.gene.name),"Gene.name"]
+vat.ortho <- unlist(mapIds(org.Hs.eg.db, vat.ortho, "ENTREZID", "SYMBOL"))
+vat.LR <- data.frame(geneid=vat.ortho[match(rownames(de.vat),names(vat.ortho))],
+                        PValue=de.vat$pvalue,
+                        logFC=de.vat$log2FoldChange,
+                        norm_avg_readcount=rowMeans(vat.counts))
+vat.LR <- vat.LR[!is.na(vat.LR$geneid),]
+write.table(vat.LR, sep="\t", row.names=FALSE, quote=FALSE, file=file.path("./LRpath/vat_LR_input.txt"))
+
+```
+
+
+
+After downloading results from LR path
+```{r postLR}
+library(openxlsx)
+LRpath <- "C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files/LRpath"
+#LRpath <- "F:/Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files/LRpath"
+
+LR.tissue <- read.xlsx(file.path(LRpath,"tissue_LR_results.xlsx"))
+LR.sat <- read.xlsx(file.path(LRpath,"sat_LR_results.xlsx"))
+LR.vat <- read.xlsx(file.path(LRpath,"vat_LR_results.xlsx"))
+
+sort_LR <- function(LR){
+  names(LR) <- c("ID","name","ConceptType","N_gene","coeff","OR","P","FDR","Direction","SigGenes")
+  LR <- LR[order(LR$P),]
+}
+
+LR.tissue <- sort_LR(LR.tissue)
+LR.sat <- sort_LR(LR.sat)
+LR.vat <- sort_LR(LR.vat)
+
+write.csv(LR.tissue, file="RNA-Enrich_tissue.csv")
+write.csv(LR.sat, file="RNA-Enrich_bpa_sat.csv")
+write.csv(LR.vat, file="RNA-Enrich_bpa_vat.csv")
+
+
+table(LR.tissue$FDR<0.01)
+# FALSE  TRUE 
+#  8522   339
+table(LR.sat$FDR<0.05)
+# FALSE  TRUE 
+#  6923  1933
+table(LR.vat$FDR<0.05)
+# FALSE  TRUE 
+#  8343   518 
+
+
+bpa.both <- intersect(LR.sat[LR.sat$FDR<0.000001,"ID"],LR.vat[LR.vat$FDR<0.000001,"ID"])
+length(bpa.both)
+both.sat <- LR.sat[LR.sat$ID %in% bpa.both,]
+both.vat <- LR.vat[LR.vat$ID %in% bpa.both,]
+
+sat.tissue <- intersect(LR.sat[LR.sat$FDR<0.01,"ID"],LR.tissue[LR.tissue$FDR<0.01,"ID"])
+length(sat.tissue)
+vat.tissue <- intersect(LR.vat[LR.vat$FDR<0.01,"ID"],LR.tissue[LR.tissue$FDR<0.01,"ID"])
+length(vat.tissue)
+all.3 <- Reduce(intersect, list(bpa.both,sat.tissue,vat.tissue))
+length(all.3)
+
+bpa.both.gene <- intersect(rownames(de.sat[de.sat$padj<0.05,]),rownames(de.vat[de.vat$padj<0.05,]))
+length(bpa.both.gene)
+sat.tissue.gene <- intersect(rownames(de.sat[de.sat$padj<0.05,]),rownames(de.tissue[de.tissue$padj<0.05,]))
+length(sat.tissue.gene)
+vat.tissue.gene <- intersect(rownames(de.vat[de.vat$padj<0.05,]),rownames(de.tissue[de.tissue$padj<0.05,]))
+length(vat.tissue.gene)
+
+search <- function(term, which=c('tissue','sat','vat')){
+  tissue = NULL
+  vat = NULL
+  sat = NULL
+  if('tissue' %in% which)
+    tissue = LR.tissue[LR.tissue$ID %in% term,]
+  if('sat' %in% which)
+    sat <- LR.sat[LR.sat$ID %in% term,]
+  if('vat' %in% which)
+    vat <- LR.vat[LR.vat$ID %in% term,]
+  
+  return(list(tissue=tissue,vat=vat,sat=sat))
+}
+
+search("GO:1990904",which=c('sat','vat'))
+
+search.by.name <- function(term, which=c('sat','vat')){
+  tissue = NULL
+  vat = NULL
+  sat = NULL
+  if('tissue' %in% which)
+    tissue = LR.tissue[LR.tissue$name %in% term,]
+  if('sat' %in% which)
+    sat <- LR.sat[LR.sat$name %in% term,]
+  if('vat' %in% which)
+    vat <- LR.vat[LR.vat$name %in% term,]
+  
+  return(list(tissue=tissue,vat=vat,sat=sat))
+}
+
+search.by.name("nucleoplasma part")
+
+
+```
+
+Network Diagrams
+
+```{r network}
+library(STRINGdb)
+string_db <- STRINGdb$new(species=9606)
+
+#load RNA enrich pathways
+setwd("C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files")
+lr.tissue <- read.csv('RNA-enrich tissue.csv',header=T, as.is=T)
+lr.sat <- read.csv('RNA-enrich bpa sat.csv',header=T, as.is=T)
+lr.vat <- read.csv('RNA-enrich bpa vat.csv',header=T, as.is=T)
+
+
+#Regulation of inflammatory response
+library(org.Hs.eg.db)
+library(annotate)
+gene.sat <- lr.sat[lr.sat$name=="regulation of inflammatory response",'SigGenes']
+gene.sat <- unlist(strsplit(gene.sat, ", "))
+gene.sat <- unique(gene.sat)
+gene.sat.sym <- mapIds(org.Hs.eg.db, gene.sat, "SYMBOL", "ENTREZID")
+
+gene.vat <- lr.vat[lr.vat$name=="regulation of inflammatory response",'SigGenes']
+gene.vat <- unlist(strsplit(gene.vat, ", "))
+gene.vat <- unique(gene.vat)
+gene.vat.sym <- mapIds(org.Hs.eg.db, gene.vat, "SYMBOL", "ENTREZID")
+
+genes.sym <- unique(c(gene.sat.sym,gene.vat.sym))
+
+both.gene.df <- data.frame(gene=genes.sym)
+both_map <- string_db$map(both.gene.df,"gene")
+both_map <- both_map[!is.na(both_map$STRING_id),]
+both_hits <- both_map$"STRING_id"
+payload_id <- string_db$post_payload(both_hits, colors=ifelse(both_map$gene %in% gene.sat.sym & both_map$gene %in% gene.vat.sym, "#f709ff", ifelse(both_map$gene %in% gene.sat.sym, "#ff1100", "#0392ff")))
+pdf('STRINGdb_regulation_inflammatory_response.pdf')
+  string_db$plot_network(both_hits, payload_id = payload_id)
+  string_db$plot_network(both_hits, required_score = 300, payload_id = payload_id)
+dev.off()
+
+#version10.string-db.org/10/p/5190488552
+
+plot.new()
+legend('center',legend=c('SAT', 'SAT and VAT', 'VAT'), fill=c("#ff1100","#f709ff", "#0392ff"))
+
+
+###chromatin modification
+gene.sat <- lr.sat[lr.sat$name=="chromatin modification",'SigGenes']
+gene.sat <- unlist(strsplit(gene.sat, ", "))
+gene.sat <- unique(gene.sat)
+gene.sat.sym <- mapIds(org.Hs.eg.db, gene.sat, "SYMBOL", "ENTREZID")
+
+gene.vat <- lr.vat[lr.vat$name=="chromatin modification",'SigGenes']
+gene.vat <- unlist(strsplit(gene.vat, ", "))
+gene.vat <- unique(gene.vat)
+gene.vat.sym <- mapIds(org.Hs.eg.db, gene.vat, "SYMBOL", "ENTREZID")
+
+genes.sym <- unique(c(gene.sat.sym,gene.vat.sym))
+
+both.gene.df <- data.frame(gene=genes.sym)
+both_map <- string_db$map(both.gene.df,"gene")
+both_map <- both_map[!is.na(both_map$STRING_id),]
+both_hits <- both_map$"STRING_id"
+payload_id <- string_db$post_payload(both_hits, colors=ifelse(both_map$gene %in% gene.sat.sym & both_map$gene %in% gene.vat.sym, "#f709ff", ifelse(both_map$gene %in% gene.sat.sym, "#ff1100", "#0392ff")))
+pdf('STRINGdb_chromatin_modification.pdf')
+  string_db$plot_network(both_hits, payload_id = payload_id)
+  string_db$plot_network(both_hits, required_score = 300, payload_id = payload_id)
+dev.off()
+
+#http://version10.string-db.org/10/p/4071488558
+
+```
+
+
+Plotting normalized counts of some genes of interest
+
+```{r plotcount}
+plot_gene <- function(gene, samps, breaks, ylim){
+  counts <- plotCounts(samps, gene=gene, intgroup='group.ID',returnData=T)
+  ggplot(data=counts, aes(x=group.ID, y=count)) +
+    geom_point(size=2.5, position=position_jitter(w=0.08,h=0)) +
+    geom_errorbar(stat="summary", fun.y="mean", width=0.6,
+              aes(ymax=..y.., ymin=..y..)) +
+    ylab("Normalized Count") +
+    ggtitle(gene) +
+    coord_trans(y="log2", limy=ylim) +
+    theme_bw() +
+    theme(axis.title.x=element_blank(),
+          axis.text.x=element_text(face="bold",size=14),
+          axis.text.y=element_text(size=14),
+          axis.title.y=element_text(face="bold",size=14),
+          plot.title=element_text(face="bold",size=18, hjust=0.5),
+          panel.grid.minor=element_blank()) +
+    scale_y_continuous(breaks=breaks, labels=breaks)
+}
+
+
+tissue.ds <- combi.ds[,combi.ds$group.ID %in% c('SATC','VATC')]
+tissue.ds$group.ID <- factor(ifelse(tissue.ds$group.ID=='SATC','Subcutaneous Controls','Visceral Controls'))
+
+plot_gene("HOXC9", tissue.ds, breaks=c(0.5,10,20,50,100,200), ylim=c(0.3,400))
+plot_gene("IRX2", tissue.ds, breaks=c(0.5,10,20,50,100,200), ylim=c(0.3,400))
+
+
+bpasat.ds <- combi.ds[,combi.ds$group.ID %in% c('SATC','SATB2')]
+bpasat.ds$ group.ID <- factor(ifelse(bpasat.ds$group.ID=='SATC','Subcutaneous Controls','Subcutaneous BPA'))
+
+plot_gene('CNTD2', bpasat.ds, breaks=c(50,100,150,250), ylim=c(40,300))
+plot_gene('LOC114112289', bpasat.ds, breaks=c(50,100,200,500,1000), ylim=c(30,1300))
+
+
+plotCounts(combi.ds, gene="LOC114114128", intgroup='group.ID')
+plotCounts(combi.ds, gene="SLC7A8", intgroup='group.ID')
+```
+
+
+
+
+Formatting of differential expression results tables
+
+```{r tabFmt}
+setwd("C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files")
+
+### format differential gene tables
+
+de_tissue <- read.csv("SAT vs VAT DE.csv")
+de_sat <- read.csv("BPA (Subcutaneous) DE.csv")
+de_vat <- read.csv("BPA (visceral) DE.csv")
+
+de_fmt <- function(tab){
+  rownames(tab) <- tab$X
+  tab$baseMean <- round(tab$baseMean, 2)
+  tab$log2FoldChange <- as.character(signif(tab$log2FoldChange, 3))
+  tab$lfcSE <- as.character(signif(tab$lfcSE, 3))
+  tab$pvalue <- as.numeric(formatC(tab$pvalue, format="e", digits=2))
+  tab$padj <- as.numeric(formatC(tab$padj, format="e", digits=2))
+  tab <- tab[,-1]
+}
+
+de_tissue2 <- de_fmt(de_tissue)
+de_sat2 <- de_fmt(de_sat)
+de_vat2 <- de_fmt(de_vat)
+
+write.csv(de_tissue2, file="DE SAT vs VAT.csv")
+write.csv(de_sat2, file="DE BPA (subcutaneous).csv")
+write.csv(de_vat2, file="DE BPA (visceral).csv")
+
+
+### format pathway tables
+
+lr_tissue <- read.csv("RNA-Enrich_tissue.csv")
+lr_sat <- read.csv("RNA-Enrich_bpa_sat.csv")
+lr_vat <- read.csv("RNA-Enrich_bpa_vat.csv")
+
+lr_fmt <- function(tab){
+  tab$coeff <- signif(tab$coeff,3)
+  tab$OR <- round(tab$OR,2)
+  tab$P <- as.numeric(formatC(tab$P, format="e", digits=2))
+  tab$FDR <- as.numeric(formatC(tab$FDR, format="e", digits=2))
+  tab[,-1]
+}
+
+lr_tissue2 <- lr_fmt(lr_tissue)
+lr_sat2 <- lr_fmt(lr_sat)
+lr_vat2 <- lr_fmt(lr_vat)
+
+write.csv(lr_tissue2, file="RNA-Enrich tissue.csv", row.names = F)
+write.csv(lr_sat2, file="RNA-Enrich bpa sat.csv", row.names = F)
+write.csv(lr_vat2, file="RNA-Enrich bpa vat.csv", row.names = F)
+
+```
+
+Heatmap of pathways
+```{r pathHeat}
+setwd("C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files")
+lr_tissue <- read.csv("RNA-Enrich tissue.csv")
+lr_sat <- read.csv("RNA-Enrich bpa sat.csv")
+lr_vat <- read.csv("RNA-Enrich bpa vat.csv")
+
+tissue_top <- lr_tissue[lr_tissue$FDR<0.05,]
+
+
+sat_top <- lr_sat[lr_sat$FDR<0.000001,]
+vat_top <- lr_vat[lr_vat$FDR<0.000001,]
+
+paths.sat <- as.character(sat_top$ID)
+paths.vat <- as.character(vat_top$ID)
+paths.both <- intersect(paths.sat,paths.vat)
+
+paths <- unique(c(paths.sat,paths.vat))
+
+construct_mat <- function(path.set, tissue=F){
+  sat_paths <- lr_sat[match(path.set,lr_sat$ID),-which(colnames(lr_sat)=="SigGenes")]
+  vat_paths <- lr_vat[match(path.set,lr_vat$ID),-which(colnames(lr_vat)=="SigGenes")]
+  
+  if(tissue==T){
+    tis_paths <- lr_tissue[match(path.set,lr_tissue$ID),-which(colnames(lr_tissue)=="SigGenes")]
+    for_clust <- data.frame(TISSUE=tis_paths$OR, SAT=sat_paths$OR, VAT=vat_paths$OR)
+    for_clust <- as.matrix(for_clust)
+    rownames(for_clust) <- sat_paths$name
+    
+    return(for_clust)
+  }
+  
+  for_clust <- data.frame(SAT=sat_paths$OR,VAT=vat_paths$OR)
+  for_clust <- as.matrix(for_clust)
+  rownames(for_clust) <- sat_paths$name
+  return(for_clust)
+}
+
+
+library(gplots)
+
+color.gradient <- colorRampPalette(c('firebrick4','firebrick3','gainsboro','royalblue3','royalblue4'))
+col.breaks <- c(seq(0,1,length=6),seq(1.2,2.1,length=5))
+#col.breaks <- c(0,0.66,1,1.33,2.33,4)
+
+for_clust <- construct_mat(paths)
+
+pdf('heatmap_paths_SAT_VAT.pdf')
+heatmap.2(for_clust
+          ,dendrogram='none'
+          ,density.info='none'
+          ,trace='none'
+          ,col=color.gradient(10)
+          ,breaks=col.breaks
+          ,margins=c(0,0)
+          ,lmat=rbind(c(0,4,4,0),c(0,5,5,0),c(3,1,2,0),c(0,0,0,0))
+          ,lhei=c(0.2,1.2,4,1)
+          ,lwid=c(1,0.5,3,1.2)
+          ,cexCol=2.1
+          ,key.xlab="Enrichment Odds Ratio"
+          ,key.title="OR"
+          ,RowSideColors = ifelse(paths %in% paths.both, "gray50", ifelse(paths %in% sat_top$ID, "gray80", "gray6"))
+          ,labRow=NA
+          ,labCol=c("BPA in\n SAT", "BPA in\n VAT")
+          ,srtCol=0
+          ,adjCol=c(0.5,0.8)
+          )
+par(xpd=TRUE)
+legend(-0.1,0.5, legend=c("SAT","Both","VAT"),fill=c("gray80","gray50","gray6"), bty='n')
+dev.off()
+
+
+### tissue
+
+for_clust <- data.frame(Tissue=tissue_top$OR)
+rownames(for_clust) <- tissue_top$name
+for_clust <- as.matrix(for_clust)
+
+
+pdf('heatmap_paths_tissue_small.pdf')
+  heatmap.2(cbind(for_clust,for_clust)
+          ,dendrogram='none'
+          ,density.info='none'
+          ,trace='none'
+          ,col=color.gradient(10)
+          ,breaks=col.breaks
+          ,margins=c(0,0)
+          ,lmat=rbind(c(3,4,4,0),c(0,2,1,0),c(0,0,0,0))
+          #,lmat=rbind(c(0,0,4,0),c(0,0,3,0),c(0,2,1,0),c(0,0,0,0))
+          ,lhei=c(1, 2.2, 0.5)
+          ,lwid=c(0.1, 1, 1.8, 10)
+          ,cexCol=2.1
+          ,key.xlab="Enrichment Odds Ratio"
+          ,key.title="OR"
+          ,labRow=""
+          ,labCol=c("SAT vs VAT", "")
+          ,srtCol=0
+          ,adjCol=c(0.28,0.8)
+          )
+dev.off()
+
+```
+
+
+Expression heatmap, venn diagram
+```{r}
+library(gplots)
+library(ggplot2)
+library(grid)
+library(gridGraphics)
+library(gridExtra)
+library(psycho)
+library(magrittr)
+library(eulerr)
+
+setwd('C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA')
+load('combi_ram.ds.rda')
+
+setwd("C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files")
+de.tissue <- read.csv('DE SAT vs VAT.csv',header=T,row.names="X")
+de.sat <- read.csv('DE BPA (Subcutaneous).csv',header=T,row.names="X")
+de.vat <- read.csv('DE BPA (visceral).csv',header=T,row.names="X")
+
+top.sat <- rownames(de.sat[de.sat$padj<0.05,])
+top.vat <- rownames(de.vat[de.vat$padj<0.05,])
+top.tis <- rownames(de.tissue[de.tissue$padj<0.05,])
+
+counts <- counts(combi.ds)
+
+
+#top DE by BPA sat
+counts.top <- counts[,combi.ds$tissue=="SAT"]
+coln <- colnames(counts.top)
+counts.top <- counts.top[rownames(de.sat)[1:200],] %>% t() %>% data.frame() %>% standardize() %>% t()
+colnames(counts.top) <- coln
+
+labs <- ifelse(colData(combi.ds)[colnames(counts.top),"group.ID"]=='SATC', 'SAT Con', 'SAT BPA')
+heatmap.2(counts.top, labCol=labs, trace="none", density.info="none", dendrogram="column",
+          col=colorRampPalette(c("blue","white","red"))(128), key=FALSE)
+grid.echo()
+sat.hm <- grid.grab()
+
+#top DE by BPA vat
+counts.top <- counts[,combi.ds$tissue=="VAT"]
+coln <- colnames(counts.top)
+counts.top <- counts.top[rownames(de.vat)[1:200],] %>% t() %>% data.frame() %>% standardize() %>% t()
+colnames(counts.top) <- coln
+
+labs <- ifelse(colData(combi.ds)[colnames(counts.top),"group.ID"]=='VATC', 'VAT Con', 'VAT BPA')
+heatmap.2(counts.top, labCol=labs, trace="none", density.info="none", dendrogram="column",
+          col=colorRampPalette(c("blue","white","red"))(128))
+grid.echo()
+vat.hm <- grid.grab()
+
+
+tiff("heatmap_samples_2pannel.tif", height=8, width=14, units='in', res=300)
+grid.arrange(sat.hm, vat.hm, widths=c(1,1), clip=TRUE,
+             layout_matrix=rbind(c(1,2)))
+dev.off()
+
+
+### venn diagram
+
+vnc <- euler(list(SAT=top.sat, VAT=top.vat, TISSUE=top.tis))
+p <- plot(vnc, quantities=T, adjust_lables=T, labels=F)
+
+pdf("venn_FDR05_genes.pdf")
+p
+grid.text("BPA in VAT", 0.60, 0.12, gp=gpar(fontface="bold"))
+grid.text("BPA in SAT", 0.24, 0.16, gp=gpar(fontface="bold"))
+grid.text("SAT vs VAT", 0.52, 0.65, gp=gpar(fontface="bold"))
+dev.off()
+
+```
+
+
+
+Figure 1 construction
+```{r fig1}
+library(grid)
+library(gridExtra)
+library(gridGraphics)
+
+#format volcano
+vc.tis <- EnhancedVolcano(shrink.tissue_cont, 
+                title='Subcutaneous Control vs Visceral Controls',
+                subtitle='',
+                caption='',
+                lab=gene.labels, 
+                selectLab=c('LRRN4','BARX1','TF','EPHX2','HOXC9','PITX2','IRX2','HOXA9'),
+                x='log2FoldChange',
+                y='padj',
+                ylab = bquote(~-Log[10]~adjusted~italic(P)),
+                #xlim = c(-4.5,6.0),
+                #ylim = c(0,40),
+                legendVisible = F,
+                pCutoff=0.05,
+                FCcutoff=2.5,
+                transcriptLabSize = 3.0,
+                #drawConnectors = TRUE,
+                transcriptPointSize = 1.7,
+                colAlpha = 1) +
+  theme(plot.margin = unit(c(1,8,2,1),"lines"), plot.title = element_text(size=16),
+        axis.text = element_text(size=14)) +
+  coord_cartesian(clip="off") +
+  annotation_custom(textGrob("Greater Expression in VAT"), xmin=-7.5, xmax=-7.5, ymin=-9, ymax=-9) +
+  annotation_custom(textGrob("Greater Expression in SAT"), xmin=9, xmax=9, ymin=-9, ymax=-9)
+  
+
+
+#format heatmap
+for_clust <- data.frame(Tissue=tissue_top$OR)
+rownames(for_clust) <- tissue_top$name
+for_clust <- as.matrix(for_clust)
+
+hm.tis <- function(){
+  heatmap.2(cbind(for_clust,for_clust)
+          ,dendrogram='none'
+          ,density.info='none'
+          ,trace='none'
+          ,col=color.gradient(10)
+          ,breaks=col.breaks
+          ,margins=c(0,0)
+          ,lmat=rbind(c(3,4,4,0),c(0,2,1,0),c(0,0,0,0))
+          #,lmat=rbind(c(0,0,4,0),c(0,0,3,0),c(0,2,1,0),c(0,0,0,0))
+          ,lhei=c(0.6, 3, 0.5)
+          ,lwid=c(0.1, 1, 1.8, 8)
+          ,cexCol=2.1
+          ,key.xlab="Enrichment Odds Ratio"
+          ,key.title="OR"
+          ,labRow=""
+          ,labCol=c("SAT vs VAT", "")
+          ,srtCol=0
+          ,adjCol=c(0.28,0.8)
+          )
+}
+
+
+hm.tis()
+grid.echo()
+hm.tisg <- grid.grab()
+
+#apply letter lables
+fig1_plots <- list(vc.tis, hm.tisg)
+fig1_label <- list("A.", "B.")
+fig1_plots <- lapply(1:length(fig1_plots), FUN = function(i){
+  arrangeGrob(fig1_plots[[i]], top = textGrob(fig1_label[[i]], x= unit(0, "npc")
+                                ,y= unit(1, "npc"), just= c("left","top"),
+                                gp=gpar(col="black", fontsize=18)))
+})
+
+
+tiff("Fig1.tif", height=8, width=12, units='in', res=300)
+grid.arrange(fig1_plots[[1]], fig1_plots[[2]], clip=TRUE,
+             widths=c(2,1),
+             layout_matrix=rbind(c(1,2)))
+dev.off()
+
+```
+
+Figure 2 construction
+```{r fig2}
+vc.vat <- EnhancedVolcano(shrink.b2_vat, 
+                title='Bisphenol A (Visceral)',
+                subtitle='',
+                caption='',
+                legendVisible = F,
+                lab=rownames(shrink.b2_vat), 
+                selectLab=c('SLC7A8','LOC114114128'),
+                x='log2FoldChange',
+                y='padj',
+                ylab = bquote(~-Log[10]~adjusted~italic(P)),
+                xlim = c(-3.2,5.0),
+                ylim = c(0,10),
+                pCutoff=0.05,
+                FCcutoff=1.5,
+                transcriptLabSize = 3.0,
+                transcriptPointSize = 1.7,
+                colAlpha = 1) +
+  theme(plot.margin = unit(c(1,4,4,1),"lines"), plot.title = element_text(size=12),
+        axis.text = element_text(size=10)) +
+  coord_cartesian(clip="off") +
+  annotation_custom(textGrob("Greater Expression \nin Control"), xmin=-2.1, xmax=-2.1, ymin=-6, ymax=-6) +
+  annotation_custom(textGrob("Greater Expression \nwith BPA"), xmin=3, xmax=3, ymin=-6, ymax=-6)
+
+
+vc.sat <- EnhancedVolcano(shrink.b2_sat, 
+                title='Bisphenol A (Subcutaneous)',
+                subtitle='',
+                caption='',
+                legendVisible = F,
+                lab=rownames(shrink.b2_sat), 
+                selectLab=c('SFRP2', 'SRGN','CNTD2','LOC114117140','LOC114112289'),
+                x='log2FoldChange',
+                y='padj',
+                ylab = bquote(~-Log[10]~adjusted~italic(P)),
+                xlim = c(-3.2,5.0),
+                ylim = c(0,10),
+                pCutoff=0.05,
+                FCcutoff=1.5,
+                transcriptLabSize = 3.5,
+                transcriptPointSize = 1.8,
+                colAlpha = 1) +
+    theme(plot.margin = unit(c(1,4,4,1),"lines"), plot.title = element_text(size=12),
+        axis.text = element_text(size=10)) +
+    coord_cartesian(clip="off") +
+    annotation_custom(textGrob("Greater Expression \nin Control"), xmin=-2.1, xmax=-2.1, ymin=-6, ymax=-6) +
+    annotation_custom(textGrob("Greater Expression \nwith BPA"), xmin=3, xmax=3, ymin=-6, ymax=-6)
+
+
+#vnc <- euler(list(SAT=top.sat, VAT=top.vat, TISSUE=top.tis))
+plot(vnc, quantities=T, adjust_lables=T, labels=F)
+grid.text("BPA in VAT", 0.79, 0.18, gp=gpar(fontface="bold"))
+grid.text("BPA in SAT", 0.17, 0.24, gp=gpar(fontface="bold"))
+grid.text("SAT vs VAT", 0.55, 0.65, gp=gpar(fontface="bold"))
+vd.top <- grid.grab()
+
+
+color.gradient <- colorRampPalette(c('firebrick4','firebrick3','gainsboro','royalblue3','royalblue4'))
+col.breaks <- c(seq(0,1,length=6),seq(1.2,2.1,length=5))
+#col.breaks <- c(0,0.66,1,1.33,2.33,4)
+
+for_clust <- construct_mat(paths)
+hm.satvat <- function(){
+  heatmap.2(for_clust
+          ,dendrogram='none'
+          ,density.info='none'
+          ,trace='none'
+          ,col=color.gradient(10)
+          ,breaks=col.breaks
+          ,margins=c(0,0)
+          ,lmat=rbind(c(0,4,4,0),c(0,5,5,0),c(3,1,2,0),c(0,0,0,0))
+          ,lhei=c(0.2,1.2,4,1)
+          ,lwid=c(1,0.5,3,1.2)
+          ,cexCol=2.1
+          ,key.xlab="Enrichment Odds Ratio"
+          ,key.title="OR"
+          ,RowSideColors = ifelse(paths %in% paths.both, "gray50", ifelse(paths %in% sat_top$ID, "gray80", "gray6"))
+          ,labRow=NA
+          ,labCol=c("BPA in\n SAT", "BPA in\n VAT")
+          ,srtCol=0
+          ,adjCol=c(0.5,0.8)
+          )
+}
+
+hm.satvat()
+grid.echo()
+hm.bpa <- grid.grab()
+
+plot.new()
+par(mar=c(0,0,0,0))
+legend('center', legend=c("SAT","Both","VAT"),fill=c("gray80","gray50","gray6"), bty='n', pt.cex=1.2, y.intersp = 2)
+grid.echo()
+hm.leg <- grid.grab()
+
+
+#apply letter lables
+fig2_plots <- list(vc.sat, vc.vat, vd.top, rectGrob(gp=gpar(col=NA)))
+fig2_label <- list("A.", "B.", "C.", "D.")
+fig2_plots <- lapply(1:length(fig2_plots), FUN = function(i){
+  arrangeGrob(fig2_plots[[i]], top = textGrob(fig2_label[[i]], x= unit(0, "npc")
+                                ,y= unit(1, "npc"), just= c("left","top"),
+                                gp=gpar(col="black", fontsize=18)))
+})
+
+
+tiff("Fig2.tif", height=10, width=10, units='in', res=300)
+grid.arrange(fig2_plots[[1]],fig2_plots[[2]],fig2_plots[[3]],fig2_plots[[4]], clip=TRUE,
+             heights=c(1,1), widths=c(1.3,0.7,1,1),
+             layout_matrix=rbind(c(1,1,2,2),
+                                 c(3,4,4,4)))
+dev.off()
+
+```
