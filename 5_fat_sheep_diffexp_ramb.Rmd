@@ -112,12 +112,11 @@ save(combi.ds,file='combi_ram.ds.rda')
 ```
 
 
-Note: can start from "combi.ds" and "genes.anno" objects if you don't want to run everything above.
+Note: can start from "combi.ds" object if you don't want to run everything above.
 
 ```{r}
 setwd('C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA')
 load('combi_ram.ds.rda')
-load('genes.anno.rda')
 ```
 
 
@@ -276,7 +275,23 @@ table(shrink.tissue_cont$log2FoldChange[shrink.tissue_cont$padj<0.05 & abs(shrin
 
 tab2 <- giveTable(shrink.tissue_cont,order='padj')
 head(giveTable(shrink.tissue_cont,order='lfc'))
-write.csv(tab2, file='SAT vs VAT DE.csv')
+write.csv(tab2, file='DE SAT vs VAT.csv')
+
+#mean per cell type
+res <- "C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files/"
+shrink.tissue_cont <- read.csv(file.path(res,"DE SAT vs VAT.csv"), row.names=1)
+counts <- counts(reorder, normalized=T)
+meta <- colData(reorder)
+identical(colnames(counts),rownames(meta))
+baseMean_VAT <- rowMeans(counts[,meta$group.ID=='VATC'])
+baseMean_SAT <- rowMeans(counts[,meta$group.ID=='SATC'])
+
+shrink.tissue_cont$baseMean_VAT <- round(baseMean_VAT[rownames(shrink.tissue_cont)],2) 
+shrink.tissue_cont$baseMean_SAT <- round(baseMean_SAT[rownames(shrink.tissue_cont)],2)
+
+shrink.tissue_cont <- shrink.tissue_cont[,c(6,7,2:5)]
+write.csv(shrink.tissue_cont, file.path(res,"DE genes SAT vs VAT.csv"))
+
 ```
 
 ```{r bpa_vat}
@@ -315,7 +330,23 @@ table(shrink.b2_vat$padj<0.05 & abs(shrink.b2_vat$log2FoldChange)>1.5)
 shrink.b2_vat[shrink.b2_vat$padj<0.05 & shrink.b2_vat$log2FoldChange>1.5,]
 
 tab4 <- giveTable(shrink.b2_vat,order='padj')
-write.csv(tab4, file='BPA (visceral) DE.csv')
+write.csv(tab4, file='DE BPA (visceral).csv')
+
+#mean per cell type
+res <- "C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files/"
+shrink.b2_vat <- read.csv(file.path(res,"DE BPA (visceral).csv"), row.names=1)
+counts <- counts(reorder, normalized=T)
+meta <- colData(reorder)
+identical(colnames(counts),rownames(meta))
+baseMean_VATC <- rowMeans(counts[,meta$group.ID=='VATC'])
+baseMean_VATB2 <- rowMeans(counts[,meta$group.ID=='VATB2'])
+
+shrink.b2_vat$baseMean_VATC <- round(baseMean_VATC[rownames(shrink.b2_vat)],2) 
+shrink.b2_vat$baseMean_VATB2 <- round(baseMean_VATB2[rownames(shrink.b2_vat)],2)
+
+shrink.b2_vat <- shrink.b2_vat[,c(7,6,2:5)]
+write.csv(shrink.b2_vat, file.path(res,"DE genes BPA (visceral).csv"))
+
 ```
 
 
@@ -358,9 +389,66 @@ table(shrink.b2_sat$log2FoldChange[shrink.b2_sat$padj<0.05 & shrink.b2_sat$log2F
 
 tab3 <- giveTable(shrink.b2_sat,order='padj')
 head(giveTable(shrink.b2_sat,order='lfc'))
-write.csv(tab3, file='BPA (Subcutaneous) DE.csv')
+write.csv(tab3, file='DE BPA (Subcutaneous).csv')
+
+#mean per cell type
+res <- "C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files/"
+shrink.b2_sat <- read.csv(file.path(res,"DE BPA (subcutaneous).csv"), row.names=1)
+counts <- counts(reorder, normalized=T)
+meta <- colData(reorder)
+identical(colnames(counts),rownames(meta))
+baseMean_SATC <- rowMeans(counts[,meta$group.ID=='SATC'])
+baseMean_SATB2 <- rowMeans(counts[,meta$group.ID=='SATB2'])
+
+shrink.b2_sat$baseMean_SATC <- round(baseMean_SATC[rownames(shrink.b2_sat)],2) 
+shrink.b2_sat$baseMean_SATB2 <- round(baseMean_SATB2[rownames(shrink.b2_sat)],2)
+
+shrink.b2_sat <- shrink.b2_sat[,c(7,6,2:5)]
+write.csv(shrink.b2_sat, file.path(res,"DE genes BPA (subcutaneous).csv"))
 
 ```
+
+
+Table cuts
+```{r}
+res <- "C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files/"
+res <- "F:/Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files"
+
+sat_vat <- read.csv(file.path(res,'DE genes SAT vs VAT.csv'), header=T)
+bpa_sat <- read.csv(file.path(res,'DE genes BPA (subcutaneous).csv'), header=T)
+bpa_vat <- read.csv(file.path(res,'DE genes BPA (visceral).csv'), header=T)
+
+sat_vat$FoldChange <- 2^sat_vat$log2FoldChange
+sat_vat$FoldChange <- ifelse(sat_vat$FoldChange<0.01, round(sat_vat$FoldChange,5), round(sat_vat$FoldChange,2))
+
+bpa_sat$FoldChange <- 2^bpa_sat$log2FoldChange
+bpa_sat$FoldChange <- ifelse(bpa_sat$FoldChange<0.01, round(bpa_sat$FoldChange,5), round(bpa_sat$FoldChange,2))
+
+bpa_vat$FoldChange <- 2^bpa_vat$log2FoldChange
+bpa_vat$FoldChange <- ifelse(bpa_vat$FoldChange<0.01, round(bpa_vat$FoldChange,5), round(bpa_vat$FoldChange,2))
+
+bpa_sat <- bpa_sat[,c(1:4,8,5:7)]
+bpa_vat <- bpa_vat[,c(1:4,8,5:7)]
+
+write.csv(sat_vat, file=file.path(res,'DE genes SAT vs VAT.csv'))
+write.csv(bpa_sat, file=file.path(res,'DE genes BPA (subcutaneous).csv'))
+write.csv(bpa_vat, file=file.path(res,'DE genes BPA (visceral).csv'))
+
+cut_order <- function(tab, p=0.05){
+  tab <- tab[tab$padj<p, ]
+  tab <- tab[order(-abs(tab$log2FoldChange)),]
+}
+
+sat_vat_cut <- cut_order(sat_vat)
+bpa_sat_cut <- cut_order(bpa_sat)
+bpa_vat_cut <- cut_order(bpa_vat)
+
+write.csv(sat_vat_cut, file=file.path(res,'DE genes SAT vs VAT top cut.csv'))
+write.csv(bpa_sat_cut, file=file.path(res,'DE genes BPA (subcutaneous) top cut.csv'))
+write.csv(bpa_vat_cut, file=file.path(res,'DE genes BPA (visceral) top cut.csv'))
+
+```
+
 
 ##Correlation of tissue type and bisphenol A effects
 
@@ -394,9 +482,9 @@ cor(-log(shrink.tissue_cont$padj),-log(shrink.b2_sat$padj),use='complete.obs')
 ```{r LRpath}
 #load DE genes results
 setwd("C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files")
-de.tissue <- read.csv('DE SAT vs VAT.csv',header=T,row.names="X")
-de.sat <- read.csv('DE BPA (Subcutaneous).csv',header=T,row.names="X")
-de.vat <- read.csv('DE BPA (visceral).csv',header=T,row.names="X")
+de.tissue <- read.csv('DE genes SAT vs VAT.csv',header=T,row.names="X")
+de.sat <- read.csv('DE genes BPA (Subcutaneous).csv',header=T,row.names="X")
+de.vat <- read.csv('DE genes BPA (visceral).csv',header=T,row.names="X")
 
 #load up deseq object and get normalized counts
 load('../combi_ram.ds.rda')
@@ -420,11 +508,11 @@ tissue.counts <- counts[match(rownames(de.tissue),rownames(counts)),]
 tissue.ortho <- ortho[match(rownames(de.tissue),ortho$Sheep.gene.name),"Gene.name"]
 tissue.ortho <- unlist(mapIds(org.Hs.eg.db, tissue.ortho, "ENTREZID", "SYMBOL"))
 tissue.LR <- data.frame(geneid=tissue.ortho[match(rownames(de.tissue),names(tissue.ortho))],
-                        PValue=de.tissue$pvalue,
+                        PValue=de.tissue$padj,
                         logFC=de.tissue$log2FoldChange,
                         norm_avg_readcount=rowMeans(tissue.counts))
 tissue.LR <- tissue.LR[!is.na(tissue.LR$geneid),]
-write.table(tissue.LR, sep="\t", row.names=FALSE, quote=FALSE, file=file.path("./LRpath/tissue_LR_input.txt"))
+write.table(tissue.LR, sep="\t", row.names=FALSE, quote=FALSE, file=file.path("./LRpath/tissue_LR_input2.txt"))
 
 #bpa in sat
 sat.counts <- counts[match(rownames(de.sat),rownames(counts)),]
@@ -507,21 +595,6 @@ length(sat.tissue.gene)
 vat.tissue.gene <- intersect(rownames(de.vat[de.vat$padj<0.05,]),rownames(de.tissue[de.tissue$padj<0.05,]))
 length(vat.tissue.gene)
 
-search <- function(term, which=c('tissue','sat','vat')){
-  tissue = NULL
-  vat = NULL
-  sat = NULL
-  if('tissue' %in% which)
-    tissue = LR.tissue[LR.tissue$ID %in% term,]
-  if('sat' %in% which)
-    sat <- LR.sat[LR.sat$ID %in% term,]
-  if('vat' %in% which)
-    vat <- LR.vat[LR.vat$ID %in% term,]
-  
-  return(list(tissue=tissue,vat=vat,sat=sat))
-}
-
-search("GO:1990904",which=c('sat','vat'))
 
 search.by.name <- function(term, which=c('sat','vat')){
   tissue = NULL
@@ -563,6 +636,8 @@ gene.sat <- unlist(strsplit(gene.sat, ", "))
 gene.sat <- unique(gene.sat)
 gene.sat.sym <- mapIds(org.Hs.eg.db, gene.sat, "SYMBOL", "ENTREZID")
 
+gene.sat.m <- ortho[match(gene.sat.sym,ortho$Gene.name),"Sheep.gene.name"]
+
 gene.vat <- lr.vat[lr.vat$name=="regulation of inflammatory response",'SigGenes']
 gene.vat <- unlist(strsplit(gene.vat, ", "))
 gene.vat <- unique(gene.vat)
@@ -580,7 +655,6 @@ pdf('STRINGdb_regulation_inflammatory_response.pdf')
   string_db$plot_network(both_hits, required_score = 300, payload_id = payload_id)
 dev.off()
 
-#version10.string-db.org/10/p/5190488552
 
 plot.new()
 legend('center',legend=c('SAT', 'SAT and VAT', 'VAT'), fill=c("#ff1100","#f709ff", "#0392ff"))
@@ -604,13 +678,60 @@ both_map <- string_db$map(both.gene.df,"gene")
 both_map <- both_map[!is.na(both_map$STRING_id),]
 both_hits <- both_map$"STRING_id"
 payload_id <- string_db$post_payload(both_hits, colors=ifelse(both_map$gene %in% gene.sat.sym & both_map$gene %in% gene.vat.sym, "#f709ff", ifelse(both_map$gene %in% gene.sat.sym, "#ff1100", "#0392ff")))
-pdf('STRINGdb_chromatin_modification.pdf')
+pdf('STRINGdb_chromatin_modification_test.pdf')
   string_db$plot_network(both_hits, payload_id = payload_id)
-  string_db$plot_network(both_hits, required_score = 300, payload_id = payload_id)
+  string_db$plot_network(both_hits, required_score = 900, payload_id = payload_id)
 dev.off()
 
-#http://version10.string-db.org/10/p/4071488558
 
+
+### p < 0.05 both
+de.sat <- read.csv('DE genes BPA (Subcutaneous).csv',header=T,row.names="X")
+de.vat <- read.csv('DE genes BPA (visceral).csv',header=T,row.names="X")
+
+de.sat <- read.table("./LRpath/sat_LR_input.txt", header=T)
+de.vat <- read.table("./LRpath/vat_LR_input.txt", header=T)
+
+top.sat <- de.sat[de.sat$PValue<0.05,]
+top.vat <- de.vat[de.vat$PValue<0.05,]
+
+top.both <- intersect(top.sat$geneid,top.vat$geneid)
+top.both <- as.character(top.both)
+top.both.sym <- mapIds(org.Hs.eg.db, top.both, "SYMBOL", "ENTREZID")
+
+rownames(top.sat) <- top.sat$geneid
+rownames(top.vat) <- top.vat$geneid
+
+nrow(top.sat)
+nrow(top.vat)
+length(top.both)
+
+both.gene.eff <- data.frame(gene=top.both.sym,
+                            sat=top.sat[top.both, 'logFC'],
+                            vat=top.vat[top.both, 'logFC'])
+both.gene.eff$direction <- ifelse(both.gene.eff$sat > 0 & both.gene.eff$vat > 0, 'Both Up',
+                                  ifelse(both.gene.eff$sat > 0 & both.gene.eff$vat < 0, 'SAT Up, Vat Down',
+                                         ifelse(both.gene.eff$sat < 0 & both.gene.eff$vat > 0, 'Sat Down, Vat Up', 'Both Down')))
+both.gene.eff$col <- ifelse(both.gene.eff$sat > 0 & both.gene.eff$vat > 0, '#0392ff',
+                                  ifelse(both.gene.eff$sat > 0 & both.gene.eff$vat < 0, '#f709ff',
+                                         ifelse(both.gene.eff$sat < 0 & both.gene.eff$vat > 0, '#FDA533', '#ff1100')))
+
+both.gene.df <- data.frame(gene=top.both.sym)
+both_map <- string_db$map(both.gene.df,"gene")
+both_map <- both_map[!is.na(both_map$STRING_id),]
+both_hits <- both_map$"STRING_id"
+payload_id <- string_db$post_payload(both_hits, colors=both.gene.eff[match(both_map$gene,both.gene.eff$gene), 'col'])
+pdf('STRINGdb_top_overlap_p05.pdf')
+  string_db$plot_network(both_hits, payload_id = payload_id)
+  string_db$plot_network(both_hits, required_score = 700, payload_id = payload_id)
+dev.off()
+
+
+pdf('legend.pdf')
+plot.new()
+legend('center', legend=c('Down in Both', 'Up in Both','Down in SAT, Up in VAT'),
+       fill=c('#0392ff', '#ff1100', '#FDA533'))
+dev.off()
 ```
 
 
@@ -831,9 +952,9 @@ setwd('C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA')
 load('combi_ram.ds.rda')
 
 setwd("C:/Users/John/Google Drive/Misc/RNAseq/Sheep_RNAseq/Adipose_BPA/Results Files")
-de.tissue <- read.csv('DE SAT vs VAT.csv',header=T,row.names="X")
-de.sat <- read.csv('DE BPA (Subcutaneous).csv',header=T,row.names="X")
-de.vat <- read.csv('DE BPA (visceral).csv',header=T,row.names="X")
+de.tissue <- read.csv('DE genes SAT vs VAT.csv',header=T,row.names="X")
+de.sat <- read.csv('DE genes BPA (Subcutaneous).csv',header=T,row.names="X")
+de.vat <- read.csv('DE genes BPA (visceral).csv',header=T,row.names="X")
 
 top.sat <- rownames(de.sat[de.sat$padj<0.05,])
 top.vat <- rownames(de.vat[de.vat$padj<0.05,])
